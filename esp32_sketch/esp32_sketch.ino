@@ -58,12 +58,16 @@
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-String serialInput;
-int intruderPhotos = 0;
-
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
+// Replace with your network credentials
+const char* ssid     = "antoniohome";
+const char* password = "pastaalforno";
+
+String serialInput;
+int intruderPhotos = 0;
+
 
 // Variables to save date and time
 String formattedDate;
@@ -76,6 +80,19 @@ void setup() {
   Serial.begin(9600);
   //Serial.setDebugOutput(true);
   //Serial.println();
+  
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  // Print local IP address and start web server
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  timeClient.begin();
   
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -128,14 +145,20 @@ void setup() {
     return;
   }
     
-  timeClient.begin();
-  
 }
 
-String pictureName(String prefix) {
-
-  formattedDate = timeClient.getFormattedDate();  
-  return "/" + formattedDate +".jpg";
+String pictureName(String prefix) { 
+  while(!timeClient.update()) {
+    timeClient.forceUpdate();
+  }
+  // The formattedDate comes with the following format:
+  // 2018-05-28T16:00:13Z
+  // We need to extract date and time
+  formattedDate = timeClient.getFormattedDate();
+  formattedDate.replace(':', '.');
+  Serial.println(formattedDate);
+  
+  return "/" + prefix + "-" + formattedDate + ".jpg";
 }
 
 void takePicture(String path) {
@@ -166,9 +189,6 @@ void takePicture(String path) {
 
 
 void loop() {
-  while(!timeClient.update()) {
-    timeClient.forceUpdate();
-  }
 
   
   // takes timelapse photo
