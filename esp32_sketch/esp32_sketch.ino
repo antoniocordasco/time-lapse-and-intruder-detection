@@ -68,16 +68,24 @@ const char* password = "pastaalforno";
 String serialInput;
 int intruderPhotos = 0;
 
+// most pins can't be set to INPUT without causing errors to do with the SD card. 12 and 13 definitely don't work. 16 seems to also not work some times.
+// pin 3 is actually the UORXD pin, but it can be used if we don't need to receive serial data.
+const int motionSensorPin = 3; 
+
 
 // Variables to save date and time
 String formattedDate;
 String dayStamp;
 String timeStamp;
+String pictureFileName;
 
 void setup() {
+  Serial.begin(115200);
+
+  
+
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
  
-  Serial.begin(9600);
   //Serial.setDebugOutput(true);
   //Serial.println();
   
@@ -144,7 +152,8 @@ void setup() {
     Serial.println("No SD Card attached");
     return;
   }
-    
+  
+  pinMode(motionSensorPin, INPUT);
 }
 
 String pictureName(String prefix) { 
@@ -185,36 +194,20 @@ void takePicture(String path) {
   file.close();
   
   esp_camera_fb_return(fb);
+
+  pinMode(motionSensorPin, INPUT);
 }
 
 
-void loop() {
+void loop() { 
 
-  
-  // takes timelapse photo
-  Serial.println("taking timelapse photo");
-  takePicture(pictureName("timelapse"));
+   
+  if (digitalRead(motionSensorPin) == HIGH) {
+    pictureFileName = pictureName("intruder");
+    Serial.println("Taking picture: " + pictureFileName);
+    takePicture(pictureFileName);
+  }
 
-  // loops 60 times (1 second each loop approx)
-  for (int i = 0; i <= 60; i++) {
-    serialInput = Serial.readString(); //Read the serial data and store in var
+  delay(100);
     
-  
-    Serial.print("input: ");
-    Serial.println(serialInput);    
-
-    // checks if there is an intruder
-    if (serialInput.substring(0, 8) == "intruder") {
-      Serial.println("detected intruder, taking first photo");
-      intruderPhotos = 1;
-      takePicture(pictureName("intruder"));
-
-    // takes 4 more photos after the intruder's detection  
-    } else if (intruderPhotos >= 1 && intruderPhotos < 5) {
-      Serial.println("taking more intruder photo");
-      intruderPhotos++;
-      takePicture(pictureName("intruder"));
-    }    
-    delay(1000);
-  }  
 }
