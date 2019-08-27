@@ -61,47 +61,16 @@
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
+
 // Replace with your network credentials
 const char* ssid     = "antoniohome";
 const char* password = "pastaalforno";
-
-String serialInput;
-int intruderPhotos = 0;
 
 // most pins can't be set to INPUT without causing errors to do with the SD card. 12 and 13 definitely don't work. 16 seems to also not work some times.
 // pin 3 is actually the UORXD pin, but it can be used if we don't need to receive serial data.
 const int motionSensorPin = 3; 
 
-
-// Variables to save date and time
-String formattedDate;
-String dayStamp;
-String timeStamp;
-String pictureFileName;
-
-void setup() {
-  Serial.begin(115200);
-
-  
-
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
- 
-  //Serial.setDebugOutput(true);
-  //Serial.println();
-  
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  // Print local IP address and start web server
-  Serial.println("");
-  Serial.println("WiFi connected.");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  timeClient.begin();
-  
+camera_config_t getCameraConfig() {  
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -133,9 +102,35 @@ void setup() {
     config.jpeg_quality = 12;
     config.fb_count = 1;
   }
+  return config;
+}
+
+
+void setup() {
+  Serial.begin(115200);
+
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+ 
+  //Serial.setDebugOutput(true);
+  //Serial.println();
+  
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  // Print local IP address and start web server
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  timeClient.begin();
+  
   
   // Init Camera
-  esp_err_t err = esp_camera_init(&config);
+  camera_config_t cameraConfig = getCameraConfig();
+  esp_err_t err = esp_camera_init(&cameraConfig);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
@@ -156,25 +151,22 @@ void setup() {
   pinMode(motionSensorPin, INPUT);
 }
 
-String pictureName(String prefix) { 
+String pictureName(String prefix) {
+  String formattedDate;
+  
   while(!timeClient.update()) {
     timeClient.forceUpdate();
   }
-  // The formattedDate comes with the following format:
-  // 2018-05-28T16:00:13Z
-  // We need to extract date and time
   formattedDate = timeClient.getFormattedDate();
   formattedDate.replace(':', '.');
-  Serial.println(formattedDate);
   
   return "/" + prefix + "-" + formattedDate + ".jpg";
 }
 
 void takePicture(String path) {
   camera_fb_t * fb = NULL;
-  
-  // Take Picture with Camera
-  fb = esp_camera_fb_get();  
+
+  fb = esp_camera_fb_get(); 
   if(!fb) {
     Serial.println("Camera capture failed");
     return;
@@ -194,14 +186,14 @@ void takePicture(String path) {
   file.close();
   
   esp_camera_fb_return(fb);
-
-  pinMode(motionSensorPin, INPUT);
 }
 
 
-void loop() { 
-
-   
+void loop() {
+  String pictureFileName;
+  
+  Serial.println("loop..."); 
+     
   if (digitalRead(motionSensorPin) == HIGH) {
     pictureFileName = pictureName("intruder");
     Serial.println("Taking picture: " + pictureFileName);
