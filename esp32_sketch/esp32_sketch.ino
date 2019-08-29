@@ -1,23 +1,5 @@
-/*********
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-cam-take-photo-save-microsd-card
-  
-  IMPORTANT!!! 
-   - Select Board "ESP32 Wrover Module"
-   - Select the Partion Scheme "Huge APP (3MB No OTA)
-   - GPIO 0 must be connected to GND to upload a sketch
-   - After connecting GPIO 0 to GND, press the ESP32-CAM on-board RESET button to put your board in flashing mode
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*********/
-
 #include "esp_camera.h"
-#include "esp_timer.h"
 #include "img_converters.h"
-#include "Arduino.h"
 #include "fb_gfx.h"
 #include "fd_forward.h"
 #include "fr_forward.h"
@@ -27,13 +9,7 @@
 #include "soc/rtc_cntl_reg.h"  // Disable brownour problems
 #include "dl_lib.h"
 #include "driver/rtc_io.h"
-
-#include <TimeLib.h>  
 #include <EEPROM.h>            // read and write from flash memory
-
-#include <WiFi.h>
-#include <NTPClient.h>
-#include <WiFiUdp.h>
 
 
 // define the number of bytes you want to access
@@ -45,7 +21,6 @@
 #define XCLK_GPIO_NUM      0
 #define SIOD_GPIO_NUM     26
 #define SIOC_GPIO_NUM     27
-
 #define Y9_GPIO_NUM       35
 #define Y8_GPIO_NUM       34
 #define Y7_GPIO_NUM       39
@@ -58,18 +33,30 @@
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
 
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
-
-// Replace with your network credentials
-const char* ssid     = "antoniohome";
-const char* password = "pastaalforno";
 
 // most pins can't be set to INPUT without causing errors to do with the SD card. 12 and 13 definitely don't work. 16 seems to also not work some times.
 // pin 3 is actually the UORXD pin, but it can be used if we don't need to receive serial data.
 const int motionSensorPin = 3; 
 
+// keeps track of how many timelapse photos we have taken
+int timelapsePictureNumber = 0;
+
+// keeps track of how many intruder photos we have taken
+int intruderPictureNumber = 0;
+
+// random number that groups photos together
+int picturesGroup;
+
+// time interval between each timelapse photo
+int timelapseInterval = 60000;
+
+// time when the execution started
+unsigned long startTime;
+
+// time when the execution started
+unsigned long lastTimelapsePhotoTime;
+
+// returns the config for the camera  
 camera_config_t getCameraConfig() {  
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -108,25 +95,10 @@ camera_config_t getCameraConfig() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("Booting up...");
 
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
- 
-  //Serial.setDebugOutput(true);
-  //Serial.println();
-  
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  // Print local IP address and start web server
-  Serial.println("");
-  Serial.println("WiFi connected.");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  timeClient.begin();
-  
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector 
+  //Serial.setDebugOutput(true);   
   
   // Init Camera
   camera_config_t cameraConfig = getCameraConfig();
@@ -136,7 +108,6 @@ void setup() {
     return;
   }
   
-  //Serial.println("Starting SD Card");
   if(!SD_MMC.begin()){
     Serial.println("SD Card Mount Failed");
     return;
@@ -148,21 +119,33 @@ void setup() {
     return;
   }
   
+  picturesGroup = random(999);
   pinMode(motionSensorPin, INPUT);
+  
+  Serial.println("Calibrating motion sensor...");
+  delay(30000);
+  Serial.println("Starting...");
+  
+  startTime = millis();
+  lastTimelapsePhotoTime = startTime;
 }
 
-String pictureName(String prefix) {
-  String formattedDate;
-  
-  while(!timeClient.update()) {
-    timeClient.forceUpdate();
+// returns the path for the next photo, of type either timelapse or intruder
+String getImagePath(String imageType) {  
+  String imagePath = "/";
+  imagePath +=  picturesGroup;
+  if (imageType == "intruder") { 
+    imagePath += "-intruder-";  
+    imagePath +=  intruderPictureNumber;
+  } else {
+    imagePath += "-timelapse-";  
+    imagePath +=  timelapsePictureNumber;    
   }
-  formattedDate = timeClient.getFormattedDate();
-  formattedDate.replace(':', '.');
-  
-  return "/" + prefix + "-" + formattedDate + ".jpg";
+  imagePath +=  ".jpg";  
+  return imagePath;
 }
 
+// takes a photo and saves it onto the SD card
 void takePicture(String path) {
   camera_fb_t * fb = NULL;
 
@@ -189,17 +172,32 @@ void takePicture(String path) {
 }
 
 
+unsigned long currentTime;  
+
 void loop() {
-  String pictureFileName;
-  
-  Serial.println("loop..."); 
-     
-  if (digitalRead(motionSensorPin) == HIGH) {
-    pictureFileName = pictureName("intruder");
-    Serial.println("Taking picture: " + pictureFileName);
-    takePicture(pictureFileName);
+  camera_fb_t * fb = NULL;
+
+  currentTime = millis();
+  Serial.print(startTime);
+  Serial.print(" - ");
+  Serial.print(lastTimelapsePhotoTime);
+  Serial.print(" - ");
+  Serial.println(currentTime);
+
+  if (currentTime - lastTimelapsePhotoTime > timelapseInterval) {
+
+    // timelapse photos are taken at regular intervals
+    lastTimelapsePhotoTime = currentTime;
+    takePicture(getImagePath("timelapse"));     
+    timelapsePictureNumber++;
+    
+  } else if (digitalRead(motionSensorPin) == HIGH) {
+
+    // intruder photos are taken when the PIR sensor detects some motion
+    takePicture(getImagePath("intruder"));   
+    intruderPictureNumber++;
   }
 
-  delay(100);
-    
+  // decrease this delay to get more intruder photos.
+  delay(200);
 }
